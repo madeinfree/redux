@@ -99,23 +99,61 @@ function assertReducerSanity(reducers) {
  * @returns {Function} A reducer function that invokes every reducer inside the
  * passed object, and builds a state object with the same shape.
  */
-export default function combineReducers(reducers) {
+export default function combineReducers(reducers, options) {
   var reducerKeys = Object.keys(reducers)
   var finalReducers = {}
-  for (var i = 0; i < reducerKeys.length; i++) {
-    var key = reducerKeys[i]
+  let finalReducerKeys = []
 
-    if (NODE_ENV !== 'production') {
-      if (typeof reducers[key] === 'undefined') {
-        warning(`No reducer provided for key "${key}"`)
+  var isDynamic = options && options.dynamic
+  var bindState = options.bindState || []
+  var bindedKey = []
+  var injectHistory = options.injectHistory
+  if (isDynamic) {
+    let cacheReducers = reducers
+    let defaultReducer = (state = {}) => state
+    bindState.forEach((binder) => {
+      if (~bindedKey.indexOf(binder.key)) {
+        return
+      }
+      if (window.location.pathname === binder.pathname) {
+        finalReducers[binder.key] = cacheReducers[binder.key]
+        bindedKey.push(binder.key)
+      }
+    })
+    injectHistory.listen((e) => {
+      if (finalReducers['emptyReducer']) {
+        delete finalReducers['emptyReducer']
+      }
+      bindState.forEach((binder) => {
+        if (~bindedKey.indexOf(binder.key)) {
+          return
+        }
+        if (e.pathname === binder.pathname) {
+          finalReducers[binder.key] = cacheReducers[binder.key]
+          bindedKey.push(binder.key)
+          finalReducerKeys = Object.keys(finalReducers)
+        }
+      })
+    })
+    if (Object.keys(finalReducers).length === 0) {
+      finalReducers['emptyReducer'] = defaultReducer
+    }
+  } else {
+    for (var i = 0; i < reducerKeys.length; i++) {
+      var key = reducerKeys[i]
+
+      if (NODE_ENV !== 'production') {
+        if (typeof reducers[key] === 'undefined') {
+          warning(`No reducer provided for key "${key}"`)
+        }
+      }
+
+      if (typeof reducers[key] === 'function') {
+        finalReducers[key] = reducers[key]
       }
     }
-
-    if (typeof reducers[key] === 'function') {
-      finalReducers[key] = reducers[key]
-    }
   }
-  var finalReducerKeys = Object.keys(finalReducers)
+  finalReducerKeys = Object.keys(finalReducers)
 
   if (NODE_ENV !== 'production') {
     var unexpectedKeyCache = {}
@@ -134,6 +172,9 @@ export default function combineReducers(reducers) {
     }
 
     if (NODE_ENV !== 'production') {
+      if (isDynamic && state['emptyReducer']) {
+        delete state['emptyReducer']
+      }
       var warningMessage = getUnexpectedStateShapeWarningMessage(state, finalReducers, action, unexpectedKeyCache)
       if (warningMessage) {
         warning(warningMessage)
